@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 from db import Transform
 from model.rebuilder import Rebuilder
-from model.segmentation import ssim_seg, seg_mask
+from model.segmentation import ssim_seg, ssim_seg_mvtec, seg_mask, seg_mask_mvtec
 from tools import Timer
 from factory import *
 from db.eval_func import cal_good_index
@@ -21,38 +21,45 @@ def parse_args():
 
     return parser.parse_args()
 
-def val_mvtec(val_set, rebuilder, transform):
-    threshold_seg_dict = dict()
-    for item in val_set.val_dict:
-        item_list = list()
-        item_list = val_set.val_dict[item]
-        good_count = 0
-        for threshold_temp in range(0, 256):
-            for path in item_list:
-                image = cv2.imread(path, cv2.IMREAD_COLOR)
-                ori_h, ori_w, _ = image.shape
-                ori_img, input_tensor = transform(image)
-                out = rebuilder.inference(input_tensor)
-                re_img = out.transpose((1, 2, 0))
-                s_map = ssim_seg(ori_img, re_img)
-                s_map = cv2.resize(s_map, (ori_w, ori_h))
-                mask = seg_mask(s_map, threshold_temp)
-                good_count += cal_good_index(mask, 400)
-            if good_count >= int(0.99*len(item_list)):
-                threshold_seg_dict[item] = threshold_temp
-                break
-        print('validation: Item:{} finishes'.format(item))
+def val_mvtec(rebuilder, transform, configs):
+    if configs['db']['use_validation_set'] is True:
+        val_set = load_data_set_from_factory(configs, 'validation')
+        print('Data set: {} has been loaded'.format(configs['db']['name']))
+        threshold_seg_dict = dict()
+        for item in val_set.val_dict:
+            item_list = val_set.val_dict[item]
+            good_count = 0
+            for threshold_temp in range(0, 256):
+                for path in item_list:
+                    image = cv2.imread(path, cv2.IMREAD_COLOR)
+                    ori_h, ori_w, _ = image.shape
+                    ori_img, input_tensor = transform(image)
+                    out = rebuilder.inference(input_tensor)
+                    re_img = out.transpose((1, 2, 0))
+                    s_map = ssim_seg(ori_img, re_img)
+                    s_map = cv2.resize(s_map, (ori_w, ori_h))
+                    mask = seg_mask(s_map, threshold_temp)
+                    good_count += cal_good_index(mask, 400)
+                if good_count >= int(0.99 * len(item_list)):
+                    threshold_seg_dict[item] = threshold_temp
+                    break
+            print('validation: Item:{} finishes'.format(item))
+    elif configs['db']['use_validation_set'] is False:
+        print("validation set is not used")
+        threshold_seg_dict = dict()
+    else:
+        raise Exception("invalid input")
     return threshold_seg_dict
 
 
-def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, val_index):
+def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, configs):
     _t = Timer()
     cost_time = list()
-    threshold_dict = dict()
     if not os.path.exists(os.path.join(save_dir, 'ROC_curve')):
         os.mkdir(os.path.join(save_dir, 'ROC_curve'))
     for item in test_set.test_dict:
-        threshold_list = list()
+        s_map_list = list()
+        s_map_good_list=list()
         item_dict = test_set.test_dict[item]
 
         if not os.path.exists(os.path.join(save_dir, item)):
@@ -60,6 +67,7 @@ def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, val
             os.mkdir(os.path.join(save_dir, item, 'ori'))
             os.mkdir(os.path.join(save_dir, item, 'gen'))
             os.mkdir(os.path.join(save_dir, item, 'mask'))
+            #os.mkdir(os.path.join(save_dir, item))
         for type in item_dict:
             if not os.path.exists(os.path.join(save_dir, item, 'ori', type)):
                 os.mkdir(os.path.join(save_dir, item, 'ori', type))
@@ -76,32 +84,30 @@ def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, val
                 ori_img, input_tensor = transform(image)
                 out = rebuilder.inference(input_tensor)
                 re_img = out.transpose((1, 2, 0))
-                s_map = ssim_seg(ori_img, re_img, win_size=11, gaussian_weights=True)
-                s_map = cv2.resize(s_map, (ori_w, ori_h))
-                if val_index == 1:
-                    mask = seg_mask(s_map, threshold=threshold_seg_dict[item])
-                elif val_index == 0:
-                    mask = seg_mask(s_map, threshold=threshold_seg_dict)
+                s_map = ssim_seg_mvtec(ori_img, re_img, win_size=11, gaussian_weights=True,resize=tuple(configs['db']['resize']))
+                if threshold_seg_dict: # dict is not empty
+                    mask = seg_mask_mvtec(s_map, threshold_seg_dict[item],configs)
                 else:
-                    raise Exception("Invalid val_index")
-
+                    mask = seg_mask_mvtec(s_map, 64, configs)
                 inference_time = _t.toc()
                 img_id = path.split('.')[0][-3:]
                 cv2.imwrite(os.path.join(save_dir, item, 'ori', type, '{}.png'.format(img_id)), ori_img)
                 cv2.imwrite(os.path.join(save_dir, item, 'gen', type, '{}.png'.format(img_id)), re_img)
                 cv2.imwrite(os.path.join(save_dir, item, 'mask', type, '{}.png'.format(img_id)), mask)
                 _time.append(inference_time)
-
                 if type != 'good':
-                    threshold_list.append(s_map)
+                    s_map_bad=s_map.reshape(-1,1)
+                    s_map_list.append(s_map_bad)
                 else:
-                    pass
-
+                    s_map_good = s_map.reshape(-1, 1)
+                    s_map_good_list.append(s_map_good)
             cost_time += _time
             mean_time = np.array(_time).mean()
             print('Evaluate: Item:{}; Type:{}; Mean time:{:.1f}ms'.format(item, type, mean_time*1000))
             _t.clear()
-        threshold_dict[item] = threshold_list
+        torch.save(s_map_list, os.path.join(save_dir, item) + '/s_map.pth')
+        torch.save(s_map_good_list, os.path.join(save_dir, item) + '/s_map_good.pth')
+
     # calculate mean time
     cost_time = np.array(cost_time)
     cost_time = np.sort(cost_time)
@@ -113,12 +119,14 @@ def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, val
 
     # evaluate results
     print('Evaluating...')
-    test_set.eval(save_dir,threshold_dict)
+    test_set.eval(save_dir)
 
 
 def test_chip(test_set, rebuilder, transform, save_dir):
     _t = Timer()
     cost_time = list()
+    if not os.path.exists(os.path.join(save_dir, 'ROC_curve')):
+        os.mkdir(os.path.join(save_dir, 'ROC_curve'))
     for type in test_set.test_dict:
         img_list = test_set.test_dict[type]
         if not os.path.exists(os.path.join(save_dir, type)):
@@ -178,35 +186,11 @@ if __name__ == '__main__':
     rebuilder.load_params(args.model_path)
     print('Model: {} has been loaded'.format(configs['model']['name']))
 
-    threshold_seg_dict = {}
-    val_index = 0
-    if configs['db']['name'] == 'mvtec':
-        if configs['db']['use_validation_set'] is True:
-            # load validation set
-            val_index = 1
-            val_set = load_data_set_from_factory(configs, 'validation')
-            print('Data set: {} has been loaded'.format(configs['db']['name']))
-            # validation for threshold selection
-            print('Start Validation... ')
-            threshold_seg_dict = val_mvtec(val_set, rebuilder, transform)
-        elif configs['db']['use_validation_set'] is False:
-            val_index = 0
-        else:
-            raise Exception("Invalid input")
-    elif configs['db']['name'] == 'chip':
-        pass
-    else:
-        raise Exception("Invalid set name")
-
     # test each image
     print('Start Testing... ')
     if configs['db']['name'] == 'mvtec':
-        if configs['db']['use_validation_set'] is True:
-            test_mvtec(test_set, rebuilder, transform, args.res_dir, threshold_seg_dict, val_index)
-        elif configs['db']['use_validation_set'] is False:
-            test_mvtec(test_set, rebuilder, transform, args.res_dir, 64, val_index)
-        else:
-            raise Exception("Invalid input")
+        threshold_seg_dict = val_mvtec(rebuilder, transform,configs)
+        test_mvtec(test_set, rebuilder, transform, args.res_dir, threshold_seg_dict, configs)
     elif configs['db']['name'] == 'chip':
         test_chip(test_set, rebuilder, transform, args.res_dir)
     else:

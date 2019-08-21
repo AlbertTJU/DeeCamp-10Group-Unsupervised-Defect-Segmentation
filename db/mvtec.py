@@ -53,10 +53,11 @@ class MVTEC_with_val(data.Dataset):
         preproc(callable, optional): pre-procession on the input image
     """
 
-    def __init__(self, root, set, preproc=None):
+    def __init__(self, root, set, resize, preproc=None):
         self.root = root
         self.preproc = preproc
         self.set = set
+        self.resize=resize
 
         if set == 'train':
             self.ids = list()
@@ -130,9 +131,10 @@ class MVTEC_with_val(data.Dataset):
         else:
             return self.test_len
 
-    def eval(self, eval_dir,threshold_dict):
+    def eval(self, eval_dir):
         summary_file = open(os.path.join(eval_dir, 'summary.txt'), 'w')
         for item in self.test_dict:
+            s_map_all=torch.load(eval_dir + '/' + item + '/' + 's_map.pth')
             summary_file.write('--------------{}--------------\n'.format(item))
             labels = list()
             paccs = list()
@@ -165,13 +167,12 @@ class MVTEC_with_val(data.Dataset):
                         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
                         _, gt = cv2.threshold(gt, 1, 255, cv2.THRESH_BINARY)
                         _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
-                        _h, _w = gt.shape
-                        mask = cv2.resize(mask, (_w, _h))
+                        gt = cv2.resize(gt, self.resize)
                         labels.append(0)
 
                         type_ious.append(cal_iou(mask, gt))
                         type_bad_index+=(1-cal_good_index(mask,400))
-                        gt_re_list.append(gt.reshape(_w*_h, 1))
+                        gt_re_list.append(gt.reshape(self.resize[0] * self.resize[1], 1))
                         num_bad += 1
 
                     else:
@@ -192,7 +193,9 @@ class MVTEC_with_val(data.Dataset):
                 paccs += type_paccs
             mIoU = np.array(ious).mean()
             mPAc = np.array(paccs).mean()
-            s_map_all = np.array(threshold_dict[item]).reshape(-1, 1)
+
+            s_map_all = np.array(s_map_all).reshape(-1, 1)
+
             gt_re = np.array(gt_re_list)
             gt_re = gt_re.reshape(-1,1)
             for threshold in np.arange(0,1,0.005):
@@ -228,10 +231,11 @@ class MVTEC(data.Dataset):
         preproc(callable, optional): pre-procession on the input image
     """
 
-    def __init__(self, root, set, preproc=None):
+    def __init__(self, root, set,resize, preproc=None):
         self.root = root
         self.preproc = preproc
         self.set = set
+        self.resize=resize
 
         if set == 'train':
             self.ids = list()
@@ -280,9 +284,32 @@ class MVTEC(data.Dataset):
         else:
             return self.test_len
 
-    def eval(self, eval_dir,threshold_dict):
+    def eval(self, eval_dir):
         summary_file = open(os.path.join(eval_dir, 'summary.txt'), 'w')
+        min_defect_area_dict = dict()
         for item in self.test_dict:
+            min_defect_area_list = list()
+            gt_dir = os.path.join(self.root, item, 'ground_truth')
+            for type in os.listdir(gt_dir):
+                type_dir = os.path.join(gt_dir, type)
+                for mask in os.listdir(type_dir):
+                    mask_id = mask.split('.')[0]
+                    gt_id = '{}'.format(mask_id)
+                    if type != 'good':
+                        gt = cv2.imread(os.path.join(gt_dir, type, '{}.png'.format(gt_id)))
+                        gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
+                        _, gt = cv2.threshold(gt, 1, 255, cv2.THRESH_BINARY)
+                        gt = cv2.resize(gt, self.resize)
+                        gt_defect = (gt == 255)
+                        gt_defect_sum = float(gt_defect.sum())
+                        min_defect_area_list.append(gt_defect_sum)
+                    else:
+                        pass
+            min_defect_area_dict[item] = min(min_defect_area_list)
+
+        for item in self.test_dict:
+            s_map_all=torch.load(eval_dir + '/' + item + '/' + 's_map.pth')
+            s_map_good_all = torch.load(eval_dir + '/' + item + '/' + 's_map_good.pth')
             summary_file.write('--------------{}--------------\n'.format(item))
             labels = list()
             paccs = list()
@@ -295,6 +322,7 @@ class MVTEC(data.Dataset):
             FPR_list = list()
             TPR_list = list()
             gt_re_list = list()
+            gt_re_good_list=list()
             gt_dir = os.path.join(self.root, item, 'ground_truth')
             res_dir = os.path.join(eval_dir, item, 'mask')
             log_file = open(os.path.join(eval_dir, item, 'result.txt'), 'w')
@@ -314,24 +342,26 @@ class MVTEC(data.Dataset):
                         gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
                         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
                         _, gt = cv2.threshold(gt, 1, 255, cv2.THRESH_BINARY)
+                        gt=cv2.resize(gt,self.resize)
+                        gt_defect_area = (gt == 255)
+                        gt_defect_sum = float(gt_defect_area.sum())
+                        min_defect_area_list.append(gt_defect_sum)
+
                         _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
-                        _h, _w = gt.shape
-                        mask = cv2.resize(mask, (_w, _h))
                         labels.append(0)
 
                         type_ious.append(cal_iou(mask, gt))
-                        type_bad_index+=(1-cal_good_index(mask,800))
-                        gt_re_list.append(gt.reshape(_w*_h, 1))
+                        type_bad_index += (1-cal_good_index(mask,min_defect_area_dict[item]))
+                        gt_re_list.append(gt.reshape(-1, 1))
                         num_bad += 1
 
                     else:
                         mask = cv2.imread(os.path.join(type_dir, mask))
                         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
                         _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
-                        gt = np.zeros(shape=mask.shape, dtype=np.uint8)
                         labels.append(1)
                         num_good += 1
-                        type_good_index += (cal_good_index(mask, 800))
+                        type_good_index += (cal_good_index(mask, min_defect_area_dict[item]))
                     type_paccs.append(cal_pixel_accuracy(mask, gt))
                 if type == 'good':
                     log_file.write('mean IoU: nan\n')
@@ -342,16 +372,23 @@ class MVTEC(data.Dataset):
                 paccs += type_paccs
             mIoU = np.array(ious).mean()
             mPAc = np.array(paccs).mean()
-            s_map_all = np.array(threshold_dict[item]).reshape(-1, 1)
+
+            s_map_all = np.array(s_map_all).reshape(-1, 1)
             gt_re = np.array(gt_re_list)
             gt_re = gt_re.reshape(-1,1)
-            for threshold in np.arange(0,1,0.005):
+            threshold_set = np.hstack((np.arange(0, 0.8, 0.01), np.arange(0.8, 1, 0.005)))
+            for threshold in threshold_set:
                 FPR_list.append(cal_FPR(s_map_all, gt_re,threshold))
                 TPR_list.append(cal_TPR(s_map_all, gt_re,threshold))
+            TPR_list.append(1)
+            FPR_list.append(1)
 
             auc = cal_AUC(TPR_list, FPR_list)
+            print(auc)
             plt.figure()
-            plt.plot(FPR_list, TPR_list, '.-')
+            plt.plot(FPR_list, TPR_list, '-')
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
             plt.savefig('./eval_result/ROC_curve/' + item + '.jpg')
             acc_good = type_good_index / num_good
             acc_bad = type_bad_index / num_bad
@@ -365,6 +402,8 @@ class MVTEC(data.Dataset):
 
             log_file.write('\n')
             log_file.close()
+            torch.save(FPR_list, os.path.join(eval_dir, item) + '/FPR_list.pth')
+            torch.save(TPR_list, os.path.join(eval_dir, item) + '/TPR_list.pth')
             pass
 
 # test
