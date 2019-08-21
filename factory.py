@@ -190,6 +190,9 @@ def load_test_model_from_factory(configs):
     elif configs['model']['name'] == 'CascadeSRGAN-4skips':
         from model.networks import CASG_4skips
         net = CASG_4skips(scale_factor=configs['model']['scale_factor'],img_channel=configs['model']['img_channel'])
+    elif configs['model']['name'] == 'RED_Net_3skips_Pruning':
+        from model.networks import RED_Net_3skips_Pruning
+        net = RED_Net_3skips_Pruning(code_dim=configs['model']['code_dim'], img_channel=configs['model']['img_channel'])
     else:
         raise Exception("Invalid model name")
 

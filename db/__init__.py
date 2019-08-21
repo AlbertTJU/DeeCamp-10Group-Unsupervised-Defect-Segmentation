@@ -42,3 +42,28 @@ class Transform(object):
 
         return ori_img, image.unsqueeze(0)
 
+class Transform_chip(object):
+    #transform images for chip data
+    def __init__(self, resize):
+        self.resize = resize
+
+    def __call__(self, image):
+        if self.resize == tuple([832, 832]):
+            image = cv2.copyMakeBorder(image, 32, 32, 32, 32, cv2.BORDER_REFLECT)
+        elif self.resize == tuple([768, 768]):
+            pass
+        elif self.resize == tuple([256, 256]):
+            pass
+        else:
+            raise Exception("invaild chip size")
+        image = cv2.resize(image, self.resize)
+        ori_img = image.copy()
+        image = image.astype(np.float32) / 255.
+        if len(image.shape) == 3:
+            image = image.transpose((2, 0, 1))
+            image = torch.from_numpy(image)
+        else:
+            image = torch.from_numpy(image)
+            image = image.unsqueeze(0)
+
+        return ori_img, image.unsqueeze(0)

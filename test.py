@@ -3,7 +3,7 @@ import cv2
 import json
 import argparse
 import numpy as np
-from db import Transform
+from db import Transform, Transform_chip
 from model.rebuilder import Rebuilder
 from model.segmentation import ssim_seg, ssim_seg_mvtec, seg_mask, seg_mask_mvtec
 from tools import Timer
@@ -122,30 +122,54 @@ def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, con
     test_set.eval(save_dir)
 
 
-def test_chip(test_set, rebuilder, transform, save_dir):
+def test_chip(test_set, rebuilder, transform, save_dir, configs):
     _t = Timer()
     cost_time = list()
-    if not os.path.exists(os.path.join(save_dir, 'ROC_curve')):
-        os.mkdir(os.path.join(save_dir, 'ROC_curve'))
+    iou_list={}
+    s_map_list=list()
     for type in test_set.test_dict:
         img_list = test_set.test_dict[type]
         if not os.path.exists(os.path.join(save_dir, type)):
             os.mkdir(os.path.join(save_dir, type))
+            os.mkdir(os.path.join(save_dir, type, 'ori'))
+            os.mkdir(os.path.join(save_dir, type, 'gen'))
+            os.mkdir(os.path.join(save_dir, type, 'mask'))
+        if not os.path.exists(os.path.join(save_dir, type,'ROC_curve')):
+            os.mkdir(os.path.join(save_dir, type, 'ROC_curve'))
         for k, path in enumerate(img_list):
+            name= path.split('/')[-1]
             image = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
             _t.tic()
             ori_img, input_tensor = transform(image)
             out = rebuilder.inference(input_tensor)
             re_img = out[0]
             s_map = ssim_seg(ori_img, re_img, win_size=11, gaussian_weights=True)
-            mask = seg_mask(s_map, threshold=32)
+            _h, _w = image.shape
+            s_map_save = cv2.resize(s_map, (_w, _h))
+            s_map_list.append(s_map_save.reshape(-1,1))
+            mask = seg_mask(s_map, threshold=128)
             inference_time = _t.toc()
-            cat_img = np.concatenate((ori_img, re_img, mask), axis=1)
-            cv2.imwrite(os.path.join(save_dir, type, '{:d}.png'.format(k)), cat_img)
+            if configs['db']['resize'] == [832, 832]:
+                #cat_img = np.concatenate((ori_img[32:-32,32:-32], re_img[32:-32,32:-32], mask[32:-32,32:-32]), axis=1)
+                cv2.imwrite(os.path.join(save_dir, type, 'ori', 'mask{:d}.png'.format(k)), ori_img[32:-32,32:-32])
+                cv2.imwrite(os.path.join(save_dir, type, 'gen', 'mask{:d}.png'.format(k)), re_img[32:-32,32:-32])
+                cv2.imwrite(os.path.join(save_dir, type, 'mask', 'mask{:d}.png'.format(k)), mask[32:-32,32:-32])
+            elif configs['db']['resize'] == [768, 768]:
+                cv2.imwrite(os.path.join(save_dir, type, 'ori', 'mask{:d}.png'.format(k)), ori_img)
+                cv2.imwrite(os.path.join(save_dir, type, 'gen', 'mask{:d}.png'.format(k)), re_img)
+                cv2.imwrite(os.path.join(save_dir, type, 'mask', 'mask{:d}.png'.format(k)), mask)
+            elif configs['db']['resize'] == [256, 256]:
+                cv2.imwrite(os.path.join(save_dir, type, 'ori', name), ori_img)
+                cv2.imwrite(os.path.join(save_dir, type, 'gen', name), re_img)
+                cv2.imwrite(os.path.join(save_dir, type, 'mask', name), mask)
+            else:
+                raise Exception("invaild image size")
+            #cv2.imwrite(os.path.join(save_dir, type, '{:d}.png'.format(k)), cat_img)
             cost_time.append(inference_time)
             if (k+1) % 20 == 0:
                 print('{}th image, cost time: {:.1f}'.format(k+1, inference_time*1000))
             _t.clear()
+        torch.save(s_map_list,os.path.join(save_dir) + '/s_map.pth')
     # calculate mean time
     cost_time = np.array(cost_time)
     cost_time = np.sort(cost_time)
@@ -154,6 +178,7 @@ def test_chip(test_set, rebuilder, transform, save_dir):
     cost_time = cost_time[0:num90]
     mean_time = np.mean(cost_time)
     print('Mean_time: {:.1f}ms'.format(mean_time*1000))
+    test_set.eval(save_dir)
 
 
 if __name__ == '__main__':
@@ -180,7 +205,12 @@ if __name__ == '__main__':
 
     # init and load Rebuilder
     # load model
-    transform = Transform(tuple(configs['db']['resize']))
+    if configs['db']['name'] == 'mvtec':
+        transform = Transform(tuple(configs['db']['resize']))
+    elif configs['db']['name'] == 'chip':
+        transform = Transform_chip(tuple(configs['db']['resize']))
+    else:
+        raise Exception("invalid set name")
     net = load_test_model_from_factory(configs)
     rebuilder = Rebuilder(net, gpu_id=args.gpu_id)
     rebuilder.load_params(args.model_path)
@@ -192,6 +222,6 @@ if __name__ == '__main__':
         threshold_seg_dict = val_mvtec(rebuilder, transform,configs)
         test_mvtec(test_set, rebuilder, transform, args.res_dir, threshold_seg_dict, configs)
     elif configs['db']['name'] == 'chip':
-        test_chip(test_set, rebuilder, transform, args.res_dir)
+        test_chip(test_set, rebuilder, transform, args.res_dir, configs)
     else:
         raise Exception("Invalid set name")
