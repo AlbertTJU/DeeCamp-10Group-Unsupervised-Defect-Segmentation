@@ -84,7 +84,7 @@ def test_mvtec(test_set, rebuilder, transform, save_dir, threshold_seg_dict, con
                 ori_img, input_tensor = transform(image)
                 out = rebuilder.inference(input_tensor)
                 re_img = out.transpose((1, 2, 0))
-                s_map = ssim_seg_mvtec(ori_img, re_img, win_size=11, gaussian_weights=True,resize=tuple(configs['db']['resize']))
+                s_map = ssim_seg_mvtec(ori_img, re_img, configs, win_size=3, gaussian_weights=True)
                 if threshold_seg_dict: # dict is not empty
                     mask = seg_mask_mvtec(s_map, threshold_seg_dict[item],configs)
                 else:

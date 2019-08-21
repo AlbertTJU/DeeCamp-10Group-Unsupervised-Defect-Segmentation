@@ -2,13 +2,14 @@ from skimage.measure import compare_ssim
 import cv2
 import numpy as np
 
-def ssim_seg_mvtec(ori_img, re_img, win_size=100, gaussian_weights=True,resize=[256,256]):
+def ssim_seg_mvtec(ori_img, re_img, configs='RED_Net_2skips-mvtec', win_size=3, gaussian_weights=True):
     """
     input:
     threhold:
     return: s_map: mask
     """
     # convert the images to grayscale
+    resize = tuple(configs['db']['resize'])
     ori_img=cv2.resize(ori_img,resize)
     if len(ori_img.shape) == 3:
         ori_img = cv2.cvtColor(ori_img, cv2.COLOR_BGR2GRAY)
