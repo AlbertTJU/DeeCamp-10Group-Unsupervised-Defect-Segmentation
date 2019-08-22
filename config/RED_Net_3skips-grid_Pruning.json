@@ -19,7 +19,7 @@
     },
     "db": {
         "name": "chip",
-        "data_dir": "/home/yangxusheng/Desktop/baimingliang/deecamp10-original/chip_data_dealed/chip_bad",
+        "data_dir": "/home/yangxusheng/Desktop/baimingliang/deecamp10-original/chip_data_dealed/chip_data_good_small",
         "loader_threads": 4,
         "train_split": "train",
         "use_validation_set": false,

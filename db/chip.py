@@ -112,10 +112,11 @@ class CHIP(data.Dataset):
                 labels = list()
                 paccs = list()
                 ious = list()
-
                 FPR_list = list()
                 TPR_list = list()
                 gt_re_list = list()
+                good_num = 0
+                num_total = 0
                 gt_dir = os.path.join(self.root, 'ground_truth')
                 res_dir = os.path.join(eval_dir, item, 'mask')
                 log_file = open(os.path.join(eval_dir, item, 'result.txt'), 'w')
@@ -140,12 +141,25 @@ class CHIP(data.Dataset):
                         labels.append(0)
                         type_ious.append(cal_iou(mask, gt))
                         gt_re_list.append(gt.reshape(_w * _h, 1))
-                    else:
+                    elif item == 'good':
+                        num_total += 1
+                        mask_id = mask_type.split('.')[0]
+                        mask = cv2.imread(os.path.join(res_dir, '{}.png').format(mask_id))
+                        _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+                        pixel_defect = (mask == 255)
+                        num_pixel = float(pixel_defect.sum())
+                        if num_pixel <= 10485.76:
+                            good_num += 1
                         continue
+                    else:
+                        raise Exception ("invalid item name")
                     type_paccs.append(cal_pixel_accuracy(mask, gt))
+
                 if item == 'good':
+                    acc_good = good_num / num_total
                     log_file.write('mean IoU: nan\n')
-                else:
+                    log_file.write('classification accuracy of good samples:{:2f}\n'.format(acc_good* 100))
+                elif item == 'bad':
                     log_file.write('mean IoU:{:.2f}\n'.format(np.array(type_ious).mean() * 100))
                     log_file.write('mean Pixel Accuracy:{:2f}\n'.format(np.array(type_paccs).mean() * 100))
                     ious += type_ious
@@ -172,6 +186,8 @@ class CHIP(data.Dataset):
                     log_file.write('\n')
                     log_file.close()
                     pass
+                else:
+                    raise Exception("invalid item name")
             elif item == ".ipynb_checkpoints":
                 pass
             else:
