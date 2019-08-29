@@ -102,3 +102,93 @@ class CHIP(data.Dataset):
             return len(self.ids)
         else:
             return self.test_len
+
+    def eval(self, eval_dir):
+        summary_file = open(os.path.join(eval_dir, 'summary.txt'), 'w')
+        for item in self.test_dict:
+            if item != ".ipynb_checkpoints":
+                summary_file.write('--------------{}--------------\n'.format(item))
+                s_map_all = torch.load(eval_dir + '/' + '/' + 's_map.pth')
+                labels = list()
+                paccs = list()
+                ious = list()
+                FPR_list = list()
+                TPR_list = list()
+                gt_re_list = list()
+                good_num = 0
+                num_total = 0
+                gt_dir = os.path.join(self.root, 'ground_truth')
+                res_dir = os.path.join(eval_dir, item, 'mask')
+                log_file = open(os.path.join(eval_dir, item, 'result.txt'), 'w')
+                log_file.write('Item: {}\n'.format(item))
+                type_ious = list()
+                type_paccs = list()
+                image_count = 0
+                for mask_type in os.listdir(res_dir):
+                    log_file.write('--------------------------\nType: {}\n'.format(mask_type))
+                    image_count += 1
+                    if item != 'good':
+                        mask_id = mask_type.split('.')[0]
+                        gt_id = mask_type.split('.')[0]  # os.listdir(gt_dir)[image_count].split('.')[0]
+                        gt = cv2.imread(os.path.join(gt_dir, '{}.png').format(gt_id))
+                        mask = cv2.imread(os.path.join(res_dir, '{}.png').format(mask_id))
+                        gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
+                        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                        _, gt = cv2.threshold(gt, 1, 255, cv2.THRESH_BINARY)
+                        _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+                        _h, _w = gt.shape
+                        mask = cv2.resize(mask, (_w, _h))
+                        labels.append(0)
+                        type_ious.append(cal_iou(mask, gt))
+                        gt_re_list.append(gt.reshape(_w * _h, 1))
+                    elif item == 'good':
+                        num_total += 1
+                        mask_id = mask_type.split('.')[0]
+                        mask = cv2.imread(os.path.join(res_dir, '{}.png').format(mask_id))
+                        _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+                        pixel_defect = (mask == 255)
+                        num_pixel = float(pixel_defect.sum())
+                        if num_pixel <= 10485.76:
+                            good_num += 1
+                        continue
+                    else:
+                        raise Exception ("invalid item name")
+                    type_paccs.append(cal_pixel_accuracy(mask, gt))
+
+                if item == 'good':
+                    acc_good = good_num / num_total
+                    log_file.write('mean IoU: nan\n')
+                    log_file.write('classification accuracy of good samples:{:2f}\n'.format(acc_good* 100))
+                elif item == 'bad':
+                    log_file.write('mean IoU:{:.2f}\n'.format(np.array(type_ious).mean() * 100))
+                    log_file.write('mean Pixel Accuracy:{:2f}\n'.format(np.array(type_paccs).mean() * 100))
+                    ious += type_ious
+                    paccs += type_paccs
+                    mIoU = np.array(ious).mean()
+                    # mPAc = np.array(paccs).mean()
+
+                    s_map_all = np.array(s_map_all).reshape(-1, 1)
+                    gt_re = np.array(gt_re_list)
+                    gt_re = gt_re.reshape(-1, 1)
+                    for threshold in np.arange(0, 1, 0.005):
+                        FPR_list.append(cal_FPR(s_map_all, gt_re, threshold))
+                        TPR_list.append(cal_TPR(s_map_all, gt_re, threshold))
+
+                    auc = cal_AUC(TPR_list, FPR_list)
+                    plt.figure()
+                    plt.plot(FPR_list, TPR_list, '.-')
+                    plt.savefig('./eval_result/' + item + '/ROC_curve/' + 'roc.jpg')
+                    torch.save(type_ious, os.path.join(eval_dir) + '/type_ious.pth')
+                    log_file.write('--------------------------\n')
+                    log_file.write('Total mean IoU:{:.2f}\n'.format(mIoU * 100))
+                    log_file.write('AUC of segmentation: {:.2f}\n'.format(auc * 100))
+                    summary_file.write('mIoU:{:.2f}  auc:{:.2f}\n'.format(mIoU * 100, auc * 100))
+                    log_file.write('\n')
+                    log_file.close()
+                    pass
+                else:
+                    raise Exception("invalid item name")
+            elif item == ".ipynb_checkpoints":
+                pass
+            else:
+                raise Exception("invalid folder name")

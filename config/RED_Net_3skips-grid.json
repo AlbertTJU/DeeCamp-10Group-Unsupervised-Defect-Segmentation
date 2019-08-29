@@ -11,7 +11,7 @@
         "window_size":[3, 7, 15],
 
         "start_epoch": 0,
-        "max_epoch": 100,
+        "max_epoch": 60,
         "snapshot": 10,
         "learning_rate": 1e-3,
         "decay_rate": 10,
@@ -19,14 +19,14 @@
     },
     "db": {
         "name": "chip",
-        "data_dir": "D:/DataSet/chip_grid",
+        "data_dir": "/home/yangxusheng/Desktop/baimingliang/deecamp10-original/chip_data_dealed/chip_data_good_small",
         "loader_threads": 4,
         "train_split": "train",
         "use_validation_set": true,
         "validation_split": "validation",
         "val_split": "test",
-        "resize": [768, 768],
-        "batch_size": 32
+        "resize": [832, 832],
+        "batch_size": 16
     },
     "system": {
         "resume": false,

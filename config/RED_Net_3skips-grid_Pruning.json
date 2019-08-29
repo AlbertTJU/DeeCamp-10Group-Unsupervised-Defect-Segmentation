@@ -1,29 +1,31 @@
 {
     "model": {
-        "name": "SSIM_Net_lite",
+        "name": "RED_Net_3skips_Pruning",
         "type": "Encoder",
-        "code_dim": 128,
+        "code_dim": 160,
         "img_channel": 1,
         "fp16": false
     },
     "op": {
-        "loss": "SSIM_loss",
-        "window_size":11,
+        "loss": "Multi_SSIM_loss",
+        "window_size":[3, 7, 15],
 
         "start_epoch": 0,
-        "max_epoch": 100,
+        "max_epoch": 60,
         "snapshot": 10,
-        "learning_rate": 5e-4,
+        "learning_rate": 1e-3,
         "decay_rate": 10,
-        "epoch_steps": [95, 100]
+        "epoch_steps": [60, 100]
     },
     "db": {
         "name": "chip",
-        "data_dir": "/home/yangxusheng/Desktop/baimingliang/deecamp10-original/chip_data_dealed/chip_bad",
+        "data_dir": "/home/yangxusheng/Desktop/baimingliang/deecamp10-original/chip_data_dealed/chip_data_good_small",
         "loader_threads": 4,
         "train_split": "train",
+        "use_validation_set": false,
+        "validation_split": "validation",
         "val_split": "test",
-        "resize": [256, 256],
+        "resize": [768, 768],
         "batch_size": 16
     },
     "system": {
